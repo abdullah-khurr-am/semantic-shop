@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Build / tooling
+.next/
+out/
+dist/
+build/
+*.egg
+.DS_Store
+*.log
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local data
+postgres_data/

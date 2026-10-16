@@ -1,0 +1,21 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: semantic-shop-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: semantic
+      POSTGRES_PASSWORD: semantic
+      POSTGRES_DB: semantic_shop
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U semantic -d semantic_shop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
