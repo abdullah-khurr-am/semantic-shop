@@ -32,3 +32,6 @@ htmlcov/
 
 # Local data
 postgres_data/
+
+# Local planning (do not push)
+.plans/
