@@ -17,5 +17,28 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: semantic-shop-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Inside Compose, reach Postgres by service name (not localhost:5434)
+      DATABASE_URL: postgresql+psycopg://semantic:semantic@db:5432/semantic_shop
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
 volumes:
   postgres_data:
