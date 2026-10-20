@@ -179,7 +179,11 @@ def reindex_products(
             failed += len(chunk)
             continue
 
-        for product, vector in zip(chunk, vectors, strict=True):
+        if len(vectors) != len(chunk):
+            failed += len(chunk)
+            continue
+
+        for product, vector in zip(chunk, vectors):
             product.embedding = vector
             product.embedding_model = settings.openai_embedding_model
             succeeded += 1
