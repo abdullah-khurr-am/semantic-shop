@@ -1,73 +1,84 @@
 # Semantic Shop
 
-Hybrid semantic product search for e-commerce: natural-language queries combined with structured SQL filters (price, size, stock) via Postgres + `pgvector`.
+A small e-commerce catalog where search understands a sentence and still obeys hard constraints.
 
-This is an interview-ready demo of a data-architecture problem — bridging unstructured embeddings with relational constraints — not a chatbot wrapper.
+Ask for “large boots under $70” and the app does two things at once: it ranks products by meaning, and it filters price, category, size, and stock in SQL. Embeddings are stored next to the product row in Postgres (`pgvector`), not in a separate search service.
+
+There is no cart, checkout, or accounts. The point is the search path: natural language in, hybrid query out.
+
+## How search works
+
+```mermaid
+flowchart LR
+  Query[Natural language query] --> Parse[Parse price category size]
+  Query --> Embed[Embed the query]
+  Parse --> SQL[SQL filters]
+  Embed --> Rank[Cosine rank in pgvector]
+  SQL --> Rank
+  Products[(products + embedding)] --> Rank
+  Rank --> Results[Ranked results]
+```
+
+On create or update, the API embeds `name`, `brand`, `category`, and `description` and stores a 1536-dimension vector on the same row. Search embeds the query, applies the structured filters, then orders by cosine distance.
+
+The storefront also reads constraints out of the sentence (`under $70`, `greater than 30`, `boots`, `large`) and fills the filter bar. You can still override those filters by hand.
+
+Example queries:
+
+- `lightweight summer jacket for rainy weather under $80`
+- `large boots price less than 70 but greater than 30 usd`
 
 ## Stack
 
-| Layer | Choice |
-|-------|--------|
-| Storefront | Next.js App Router + TypeScript — `apps/web` |
-| API | FastAPI (Python) — `apps/api` |
-| Database | PostgreSQL 16 + `pgvector` (Docker) |
-| Embeddings | OpenAI `text-embedding-3-small` (1536 dims) |
+| Piece | Choice |
+| --- | --- |
+| Storefront | Next.js (App Router), TypeScript |
+| API | FastAPI |
+| Database | PostgreSQL 16 + pgvector |
+| Embeddings | OpenAI `text-embedding-3-small` |
 
-## Architecture (interview talking points)
+## Prerequisites
 
-```text
-User query ──► embed(query) ──┐
-                              ├─► SQL WHERE (price, size, stock, category)
-Product rows ◄── cosine rank ◄┘   + ORDER BY embedding <=> query_vector
-```
+- Docker
+- Node.js 20+
+- An OpenAI API key
 
-1. **Unstructured intent** — “lightweight summer jacket for rainy weather under $80”
-2. **Structured constraints** — max price, category, sizes, in-stock stay in SQL
-3. **Embed-on-write** — create/update of text fields re-embeds and stores the vector beside the row
-4. **Hybrid rank** — filters first (or conjunctively), then vector similarity
-
-Tradeoffs worth mentioning: embedding cost/latency on writes, HNSW vs IVFFlat, and moving embeds to a queue for production.
-
-## Quick start
-
-### 1. Env
+## Run it
 
 ```bash
-cp .env.example .env   # then set a real OPENAI_API_KEY
-```
+cp .env.example .env
+# set OPENAI_API_KEY in .env
 
-### 2. Backend (Docker) — start / stop yourself
-
-```bash
-# Start Postgres + API (migrates + seeds on boot)
 docker compose up -d --build
-
-# Stop everything
-docker compose down
-
-# Logs / restart API only
-docker compose logs -f api
-docker compose restart api
-
-# Embed the catalog (needs OPENAI_API_KEY in .env)
 docker compose exec api python -m app.reindex --only-missing
-```
 
-- API: http://localhost:8000 · Docs: http://localhost:8000/docs  
-- Postgres (host tools): `localhost:5434`
-
-### 3. Storefront (local Node)
-
-```bash
 cd apps/web
-cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:8000
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-App: http://localhost:3000
+- Storefront: http://localhost:3000
+- API: http://localhost:8000
+- OpenAPI: http://localhost:8000/docs
+- Postgres from the host: `localhost:5434` (user/password/db: `semantic` / `semantic` / `semantic_shop`)
 
-### Optional: API on the host (without Docker for the API)
+`docker compose up` runs migrations and loads the seed catalog if the table is empty. Products are searchable only after `reindex`, which calls OpenAI and writes the vectors. The seed is about 70 products, so the first reindex is a small embedding bill.
+
+Stop the backend with `docker compose down`. Catalog data stays in the Docker volume until you remove it.
+
+### Useful commands
+
+```bash
+docker compose logs -f api
+docker compose restart api
+docker compose exec api python -m app.reindex            # re-embed everything
+docker compose exec api python -m app.seed --reset       # wipe and reload the seed
+```
+
+### Run the API on the host instead
+
+Use this if you want hot reload. Postgres still comes from Compose.
 
 ```bash
 docker compose up -d db
@@ -79,28 +90,30 @@ python -m app.reindex --only-missing
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Demo script (5 minutes)
+`DATABASE_URL` in `.env` already points at `localhost:5434`. Compose overrides that inside the API container so it talks to the `db` service.
 
-1. Open the home page (search starts empty).
-2. Type a natural-language query — filters sync from the text (price, category, size).
-3. Show ranked results with match scores; click through to a product detail page.
-4. Go to **Admin** → create a quirky product (“glow-in-the-dark picnic tarp for misty festivals”).
-5. Search for it with different wording (“waterproof outdoor blanket for damp evenings”).
-6. Walk the schema: `products.embedding vector(1536)`, HNSW index, `POST /search` SQL shape.
+## Try the demo
 
-## API surface
+1. Search from an empty box. Filters should fill in from the sentence.
+2. Open a result and check the match score.
+3. In Admin (`/admin/products`), add a product with unusual wording.
+4. Search again with different words that mean the same thing. The new product should rank from the embedding, not from a keyword match.
 
-| Method | Path | Notes |
-|--------|------|--------|
-| `GET` | `/health` | DB ping |
-| `POST` | `/products` | Create + embed-on-write |
-| `GET` | `/products` | Paginated list |
-| `GET` | `/products/{id}` | Detail |
-| `PATCH` | `/products/{id}` | Update; re-embeds when text fields change |
+Admin has no login. It exists so you can watch embed-on-write.
+
+## API
+
+Interactive docs: http://localhost:8000/docs
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| `GET` | `/health` | Database check |
+| `POST` | `/products` | Create a product and embed it |
+| `GET` | `/products` | List products |
+| `GET` | `/products/{id}` | Product detail |
+| `PATCH` | `/products/{id}` | Update; re-embeds when text changes |
 | `DELETE` | `/products/{id}` | Delete |
-| `POST` | `/search` | Hybrid: embed query + SQL filters + cosine rank |
-
-`POST /search` example:
+| `POST` | `/search` | Embed the query, apply SQL filters, rank by similarity |
 
 ```json
 {
@@ -112,25 +125,17 @@ uvicorn app.main:app --reload --port 8000
 }
 ```
 
-Reindex CLI:
+If the embedding call fails, the product is still saved and `embedding_pending` is true. Search ignores rows with no vector.
 
-```bash
-docker compose exec api python -m app.reindex --only-missing
-# or on the host:
-python -m app.reindex --only-missing
-```
-
-## Repo layout
+## Layout
 
 ```text
-semantic-shop/
-  apps/web/          # Next.js storefront
-  apps/api/          # FastAPI + Alembic + seed/reindex (+ Dockerfile)
-  docker-compose.yml # Postgres + API
-  .env.example
-  README.md
+apps/web    Next.js storefront
+apps/api    FastAPI, Alembic, seed data, reindex
 ```
 
-## Out of scope (by design)
+`docker-compose.yml` runs Postgres and the API.
 
-Cart, auth, payments, and production deploy. Mention as next steps if asked.
+## Not in this repo
+
+Cart, payments, authentication, and a production deploy. Embeddings run inline on write; a queue would be the next step if the catalog were large.
